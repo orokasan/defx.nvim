@@ -146,6 +146,15 @@ class View(object):
 
         self._buffer.options['modifiable'] = True
 
+        # TODO: How to set cursor position for other buffer when
+        #   stay in current buffer
+        if self._buffer == self._vim.current.buffer:
+            self._vim.call('cursor', [prev_linenr, 0])
+            if prev:
+                self.search_file(prev['action__path'], prev['_defx_index'])
+            if is_force:
+                self._init_column_syntax()
+
         # NOTE: Different len of buffer line replacement cause cursor jump
         if len(lines) >= len(self._buffer):
             self._buffer[:] = lines[:len(self._buffer)]
@@ -157,14 +166,6 @@ class View(object):
         self._buffer.options['modifiable'] = False
         self._buffer.options['modified'] = False
 
-        # TODO: How to set cursor position for other buffer when
-        #   stay in current buffer
-        if self._buffer == self._vim.current.buffer:
-            self._vim.call('cursor', [prev_linenr, 0])
-            if prev:
-                self.search_file(prev['action__path'], prev['_defx_index'])
-            if is_force:
-                self._init_column_syntax()
 
         if self._context.profile:
             error(self._vim, f'redraw time = {time.time() - start}')
