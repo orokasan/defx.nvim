@@ -39,7 +39,9 @@ def do_action(view: View, defx: Defx,
     action = actions[action_name]
 
     selected_candidates = [x for x in view._candidates if x['is_selected']]
-    if ActionAttr.NO_TAGETS not in action.attr and selected_candidates:
+    if (selected_candidates and
+            ActionAttr.NO_TAGETS not in action.attr and
+            ActionAttr.TREE not in action.attr):
         # Clear marks
         for candidate in selected_candidates:
             candidate['is_selected'] = False
@@ -61,9 +63,10 @@ def do_action(view: View, defx: Defx,
 
     if ActionAttr.MARK in action.attr:
         # Update marks
+        view.update_candidates()
         view.redraw()
     elif ActionAttr.TREE in action.attr:
-        view.update_opened_candidates()
+        view.update_candidates()
         view.redraw()
     elif ActionAttr.REDRAW in action.attr:
         # Redraw

@@ -153,8 +153,10 @@ def _drop(view: View, defx: Defx, context: Context) -> None:
                 view._vim.call('win_gotoid', context.prev_winid)
             else:
                 view._vim.command('wincmd w')
-            if path.match(cwd):
+            try:
                 path = path.relative_to(cwd)
+            except ValueError:
+                pass
             view._vim.call('defx#util#execute_path', command, str(path))
 
 
@@ -214,8 +216,9 @@ def _new_directory(view: View, defx: Defx, context: Context) -> None:
     else:
         cwd = str(Path(candidate['action__path']).parent)
 
-    new_filename = cwd_input(view._vim, cwd,
-                             'Please input a new directory name: ', '', 'file')
+    new_filename = cwd_input(
+        view._vim, cwd,
+        'Please input a new directory name: ', '', 'file')
     if not new_filename:
         return
     filename = Path(cwd).joinpath(new_filename)
@@ -245,8 +248,9 @@ def _new_file(view: View, defx: Defx, context: Context) -> None:
     else:
         cwd = str(Path(candidate['action__path']).parent)
 
-    new_filename = cwd_input(view._vim, cwd,
-                             'Please input a new filename: ', '', 'file')
+    new_filename = cwd_input(
+        view._vim, cwd,
+        'Please input a new filename: ', '', 'file')
     if not new_filename:
         return
     isdir = new_filename[-1] == '/'
@@ -325,8 +329,10 @@ def _open(view: View, defx: Defx, context: Context) -> None:
             view.cd(defx, str(path), context.cursor)
             continue
 
-        if path.match(cwd):
+        try:
             path = path.relative_to(cwd)
+        except ValueError:
+            pass
         view._vim.call('defx#util#execute_path', command, str(path))
 
 
@@ -457,13 +463,15 @@ def _rename(view: View, defx: Defx, context: Context) -> None:
     for target in context.targets:
         old = target['action__path']
         new_filename = cwd_input(
-            view._vim, defx._cwd, f'New name: {old} -> ', str(old), 'file')
+            view._vim, defx._cwd,
+            f'Old name: {old}\nNew name: ', str(old), 'file')
+        view._vim.command('redraw')
         if not new_filename:
             return
         new = Path(defx._cwd).joinpath(new_filename)
         if not new or new == old:
             continue
-        if new.exists():
+        if str(new).lower() != str(old).lower() and new.exists():
             error(view._vim, f'{new} already exists')
             continue
 

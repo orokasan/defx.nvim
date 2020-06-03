@@ -105,18 +105,17 @@ class View(object):
 
         self._vim.command(f'{winnr}wincmd w')
 
-        if self._context.split in ['no', 'tab']:
-            if (self._vim.call('bufexists', self._prev_bufnr) and
-                    self._prev_bufnr != self._vim.call('bufnr', '%')):
-                self._vim.command('buffer ' + str(self._prev_bufnr))
-            else:
-                self._vim.command('enew')
+        if (self._context.split not in ['no', 'tab'] and
+                self._vim.call('winnr', '$') != 1):
+            self._vim.command('close')
+            self._vim.call('win_gotoid', self._context.prev_winid)
+        elif self._check_bufnr(self._prev_bufnr):
+            self._vim.command('buffer ' + str(self._prev_bufnr))
+        elif self._check_bufnr(self._context.prev_last_bufnr):
+            self._vim.command('buffer ' +
+                              str(self._context.prev_last_bufnr))
         else:
-            if self._vim.call('winnr', '$') != 1:
-                self._vim.command('close')
-                self._vim.call('win_gotoid', self._context.prev_winid)
-            else:
-                self._vim.command('enew')
+            self._vim.command('enew')
 
         if self._get_wininfo() and self._get_wininfo() == self._prev_wininfo:
             self._vim.command(self._winrestcmd)
@@ -229,16 +228,22 @@ class View(object):
         self._vim.call('cursor', [pos + 1, 1])
         return True
 
-    def update_opened_candidates(self) -> None:
-        # Update opened state
+    def update_candidates(self) -> None:
+        # Update opened/selected state
         for defx in self._defxs:
             defx._opened_candidates = set()
+            defx._selected_candidates = set()
         for [i, candidate] in [x for x in enumerate(self._candidates)
                                if x[1]['is_opened_tree']]:
             defx = self._defxs[candidate['_defx_index']]
             defx._opened_candidates.add(str(candidate['action__path']))
+        for [i, candidate] in [x for x in enumerate(self._candidates)
+                               if x[1]['is_selected']]:
+            defx = self._defxs[candidate['_defx_index']]
+            defx._selected_candidates.add(str(candidate['action__path']))
 
-    def open_tree(self, path: Path, index: int, max_level: int = 0) -> None:
+    def open_tree(self, path: Path, index: int, enable_nested: bool,
+                  max_level: int = 0) -> None:
         # Search insert position
         pos = self.get_candidate_pos(path, index)
         if pos < 0:
@@ -257,6 +262,15 @@ class View(object):
             str(path), base_level, base_level + max_level)
         if not children:
             return
+
+        if (enable_nested and len(children) == 1
+                and children[0]['is_directory']):
+            # Merge child.
+            target['action__path'] = children[0]['action__path']
+            target['word'] += children[0]['word']
+            target['is_opened_tree'] = False
+            return self.open_tree(target['action__path'],
+                                  index, enable_nested, max_level)
 
         for candidate in children:
             candidate['_defx_index'] = index
@@ -314,8 +328,8 @@ class View(object):
         # restore opened_candidates
         session = self._sessions[path]
         for opened_path in session.opened_candidates:
-            self.open_tree(Path(opened_path), index)
-        self.update_opened_candidates()
+            self.open_tree(Path(opened_path), index, False)
+        self.update_candidates()
         self.redraw()
 
     def _init_defx(self,
@@ -367,10 +381,11 @@ class View(object):
         buffer_options['modified'] = False
         buffer_options['filetype'] = 'defx'
 
-        self._execute_commands([
-            'silent doautocmd FileType defx',
-            'autocmd! defx * <buffer>',
-        ])
+        if not self._vim.call('has', 'nvim'):
+            # In Vim8, FileType autocmd is not fired after set filetype option.
+            self._vim.command('silent doautocmd FileType defx')
+
+        self._vim.command('autocmd! defx * <buffer>')
         self._vim.command('autocmd defx '
                           'CursorHold,FocusGained <buffer> '
                           'call defx#call_async_action("check_redraw")')
@@ -653,3 +668,7 @@ class View(object):
             else:
                 self.cd(self._defxs[index], path, self._context.cursor)
             self._update_paths(index, path)
+
+    def _check_bufnr(self, bufnr: int) -> bool:
+        return (bool(self._vim.call('bufexists', bufnr)) and
+                bufnr != self._vim.call('bufnr', '%'))

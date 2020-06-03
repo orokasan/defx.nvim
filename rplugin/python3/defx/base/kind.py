@@ -5,6 +5,7 @@
 # ============================================================================
 
 import json
+import re
 import typing
 from pathlib import Path
 
@@ -154,26 +155,39 @@ def _nop(view: View, defx: Defx, context: Context) -> None:
 
 @action(name='open_tree', attr=ActionAttr.TREE | ActionAttr.CURSOR_TARGET)
 def _open_tree(view: View, defx: Defx, context: Context) -> None:
+    nested = False
+    recursive_level = 0
+    toggle = False
+    for arg in context.args:
+        if arg == 'nested':
+            nested = True
+        elif arg == 'recursive':
+            recursive_level = 20
+        elif re.search(r'recursive:\d+', arg):
+            recursive_level = int(arg.split(':')[1])
+        elif arg == 'toggle':
+            toggle = True
+
     for target in [x for x in context.targets if x['is_directory']]:
-        view.open_tree(target['action__path'], defx._index, 0)
+        if toggle and not target['is_directory'] or target['is_opened_tree']:
+            _close_tree(view, defx, context._replace(targets=[target]))
+        else:
+            view.open_tree(target['action__path'],
+                           defx._index, nested, recursive_level)
 
 
 @action(name='open_tree_recursive',
         attr=ActionAttr.TREE | ActionAttr.CURSOR_TARGET)
 def _open_tree_recursive(view: View, defx: Defx, context: Context) -> None:
-    level = int(context.args[0]) if context.args else 20
-    for target in [x for x in context.targets if x['is_directory']]:
-        view.open_tree(target['action__path'], defx._index, level)
+    level = context.args[0] if context.args else '20'
+    _open_tree(view, defx, context._replace(
+        args=context.args + ['recursive:' + level]))
 
 
 @action(name='open_or_close_tree',
         attr=ActionAttr.TREE | ActionAttr.CURSOR_TARGET)
 def _open_or_close_tree(view: View, defx: Defx, context: Context) -> None:
-    for target in context.targets:
-        if not target['is_directory'] or target['is_opened_tree']:
-            _close_tree(view, defx, context._replace(targets=[target]))
-        else:
-            _open_tree(view, defx, context._replace(targets=[target]))
+    _open_tree(view, defx, context._replace(args=context.args + ['toggle']))
 
 
 @action(name='print')
@@ -237,9 +251,9 @@ def _search(view: View, defx: Defx, context: Context) -> None:
         parents.append(path)
 
     for parent in reversed(parents):
-        view.open_tree(parent, defx._index, 0)
+        view.open_tree(parent, defx._index, False, 0)
 
-    view.update_opened_candidates()
+    view.update_candidates()
     view.redraw()
     view.search_file(Path(search_path), defx._index)
 
