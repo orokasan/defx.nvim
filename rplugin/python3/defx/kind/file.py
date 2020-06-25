@@ -231,7 +231,7 @@ def _new_directory(view: View, defx: Defx, context: Context) -> None:
 
     filename.mkdir(parents=True)
     view.redraw(True)
-    view.search_file(filename, defx._index)
+    view.search_recursive(filename, defx._index)
 
 
 @action(name='new_file')
@@ -269,7 +269,7 @@ def _new_file(view: View, defx: Defx, context: Context) -> None:
         filename.touch()
 
     view.redraw(True)
-    view.search_file(filename, defx._index)
+    view.search_recursive(filename, defx._index)
 
 
 @action(name='new_multiple_files')
@@ -312,7 +312,7 @@ def _new_multiple_files(view: View, defx: Defx, context: Context) -> None:
             filename.touch()
 
     view.redraw(True)
-    view.search_file(filename, defx._index)
+    view.search_recursive(filename, defx._index)
 
 
 @action(name='open')
@@ -390,7 +390,7 @@ def _paste(view: View, defx: Defx, context: Context) -> None:
 
     view.redraw(True)
     if dest:
-        view.search_file(dest, defx._index)
+        view.search_recursive(dest, defx._index)
 
 
 @action(name='remove', attr=ActionAttr.REDRAW)
@@ -418,8 +418,11 @@ def _remove(view: View, defx: Defx, context: Context) -> None:
         else:
             path.unlink()
 
+        view._vim.call('defx#util#buffer_delete',
+                       view._vim.call('bufnr', str(path)))
 
-@action(name='remove_trash')
+
+@action(name='remove_trash', attr=ActionAttr.REDRAW)
 def _remove_trash(view: View, defx: Defx, context: Context) -> None:
     """
     Delete the file or directory.
@@ -443,7 +446,9 @@ def _remove_trash(view: View, defx: Defx, context: Context) -> None:
     import send2trash
     for target in context.targets:
         send2trash.send2trash(str(target['action__path']))
-    view.redraw(True)
+
+        view._vim.call('defx#util#buffer_delete',
+                       view._vim.call('bufnr', str(target['action__path'])))
 
 
 @action(name='rename')
@@ -477,5 +482,9 @@ def _rename(view: View, defx: Defx, context: Context) -> None:
 
         old.rename(new)
 
+        # Check rename
+        view._vim.call('defx#util#buffer_rename',
+                       view._vim.call('bufnr', str(old)), str(new))
+
         view.redraw(True)
-        view.search_file(new, defx._index)
+        view.search_recursive(new, defx._index)

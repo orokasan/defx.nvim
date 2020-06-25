@@ -228,6 +228,21 @@ class View(object):
         self._vim.call('cursor', [pos + 1, 1])
         return True
 
+    def search_recursive(self, path: Path, index: int) -> None:
+        parents: typing.List[Path] = []
+        tmppath: Path = path
+        while self.get_candidate_pos(
+                tmppath, index) < 0 and tmppath.parent != path:
+            tmppath = tmppath.parent
+            parents.append(tmppath)
+
+        for parent in reversed(parents):
+            self.open_tree(parent, index, False, 0)
+
+        self.update_candidates()
+        self.redraw()
+        self.search_file(path, index)
+
     def update_candidates(self) -> None:
         # Update opened/selected state
         for defx in self._defxs:
@@ -589,7 +604,12 @@ class View(object):
             self._vim.call('execute', 'syntax list')]
 
     def _execute_commands(self, commands: typing.List[str]) -> None:
-        self._vim.command(' | '.join(commands))
+        # Note: If commands are too huge, vim.command() will fail.
+        threshold = 15
+        cnt = 0
+        while cnt < len(commands):
+            self._vim.command(' | '.join(commands[cnt: cnt + threshold]))
+            cnt += threshold
 
     def _init_candidates(self) -> None:
         self._candidates = []
@@ -671,4 +691,5 @@ class View(object):
 
     def _check_bufnr(self, bufnr: int) -> bool:
         return (bool(self._vim.call('bufexists', bufnr)) and
-                bufnr != self._vim.call('bufnr', '%'))
+                bufnr != self._vim.call('bufnr', '%') and
+                self._vim.call('getbufvar', bufnr, '&filetype') != 'defx')

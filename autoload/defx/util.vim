@@ -323,3 +323,43 @@ function! s:strwidthpart_reverse(str, width) abort
   let vcol = strwidth(str) - a:width
   return matchstr(str, '\%>' . (vcol < 0 ? 0 : vcol) . 'v.*')
 endfunction
+
+function! defx#util#buffer_rename(bufnr, new_filename) abort
+  if a:bufnr < 0
+    return
+  endif
+
+  let hidden = &hidden
+
+  set hidden
+  let bufnr_save = bufnr('%')
+  noautocmd silent! execute 'buffer' a:bufnr
+  silent execute (&l:buftype ==# '' ? 'saveas!' : 'file')
+        \ fnameescape(a:new_filename)
+  if &l:buftype ==# ''
+    " Remove old buffer.
+    silent! bdelete! #
+  endif
+
+  noautocmd silent execute 'buffer' bufnr_save
+  let &hidden = hidden
+endfunction
+
+function! defx#util#buffer_delete(bufnr) abort
+  if a:bufnr < 0
+    return
+  endif
+
+  let winid = get(win_findbuf(a:bufnr), 0, -1)
+  if winid > 0
+    let winid_save = win_getid()
+    call win_gotoid(winid)
+
+    noautocmd silent enew
+    execute 'silent! bdelete!' a:bufnr
+
+    call win_gotoid(winid_save)
+  else
+    execute 'silent! bdelete!' a:bufnr
+  endif
+endfunction
