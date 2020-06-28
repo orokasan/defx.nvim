@@ -6,7 +6,9 @@
 
 import typing
 
-from defx.source.file import Source as File
+from defx.base.source import Base as Source
+from defx.source.file.list import Source as SourceList
+from defx.source.file import Source as SourceFile
 from defx.context import Context
 from defx.sort import sort
 from defx.util import Nvim
@@ -20,12 +22,14 @@ Candidate = typing.Dict[str, typing.Any]
 class Defx(object):
 
     def __init__(self, vim: Nvim, context: Context,
-                 cwd: str, index: int) -> None:
+                 source_name: str, cwd: str, index: int) -> None:
         self._vim = vim
         self._context = context
         self._cwd = self._vim.call('getcwd')
         self.cd(cwd)
-        self._source: File = File(self._vim)
+        self._source: Source = (SourceList(self._vim)
+                                if source_name == 'file/list'
+                                else SourceFile(self._vim))
         self._index = index
         self._enabled_ignored_files = not context.show_ignored_files
         self._ignored_files = context.ignored_files.split(',')
@@ -49,19 +53,23 @@ class Defx(object):
     def cd(self, path: str) -> None:
         self._cwd = str(Path(self._cwd).joinpath(path))
 
-        if self._context.auto_cd:
+        if self._context.auto_cd and Path(path).is_dir():
             cd(self._vim, path)
 
     def get_root_candidate(self) -> Candidate:
         """
         Returns root candidate
         """
+        if not self._source:
+            return {}
+
         root = self._source.get_root_candidate(self._context, Path(self._cwd))
         root['is_root'] = True
         root['is_opened_tree'] = False
         root['is_selected'] = False
         root['level'] = 0
-        root['word'] = self._context.root_marker + root['word']
+        root['word'] = '{}{}:{}'.format(self._context.root_marker,
+                                        self._source.name, root['word'])
 
         return root
 
@@ -110,6 +118,9 @@ class Defx(object):
         """
         Returns file candidates
         """
+        if not self._source:
+            return []
+
         candidates = self._source.gather_candidates(
             self._context, Path(path))
 

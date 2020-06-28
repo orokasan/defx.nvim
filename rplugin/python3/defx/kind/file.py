@@ -4,9 +4,10 @@
 # License: MIT license
 # ============================================================================
 
+from pathlib import Path
 import copy
 import importlib
-from pathlib import Path
+import mimetypes
 import shutil
 import time
 import typing
@@ -17,7 +18,7 @@ from defx.base.kind import Base
 from defx.clipboard import ClipboardAction
 from defx.context import Context
 from defx.defx import Defx
-from defx.util import cd, cwd_input, confirm, error
+from defx.util import cd, cwd_input, confirm, error, get_python_exe
 from defx.util import readable, Nvim
 from defx.view import View
 
@@ -50,6 +51,9 @@ class Kind(Base):
 
 
 def check_overwrite(view: View, dest: Path, src: Path) -> Path:
+    if not src.exists() or not dest.exists():
+        return Path('')
+
     s_stat = src.stat()
     s_mtime = s_stat.st_mtime
     view.print_msg(f' src: {src} {s_stat.st_size} bytes')
@@ -82,14 +86,22 @@ def _cd(view: View, defx: Defx, context: Context) -> None:
     """
     Change the current directory.
     """
-    path = Path(context.args[0]) if context.args else Path.home()
+    source_name = defx._source.name
+    if context.args:
+        if len(context.args) > 1:
+            source_name = context.args[0]
+            path = Path(context.args[1])
+        else:
+            path = Path(context.args[0])
+    else:
+        path = Path.home()
     path = Path(defx._cwd).joinpath(path).resolve()
-    if not readable(path) or not path.is_dir():
-        error(view._vim, f'{path} is not readable directory')
+    if not readable(path) or (source_name == 'file' and not path.is_dir()):
+        error(view._vim, f'{path} is invalid.')
         return
 
     prev_cwd = defx._cwd
-    view.cd(defx, str(path), context.cursor)
+    view.cd(defx, source_name, str(path), context.cursor)
     if context.args and context.args[0] == '..':
         view.search_file(Path(prev_cwd), defx._index)
 
@@ -139,7 +151,7 @@ def _drop(view: View, defx: Defx, context: Context) -> None:
         path = target['action__path']
 
         if path.is_dir():
-            view.cd(defx, str(path), context.cursor)
+            view.cd(defx, defx._source.name, str(path), context.cursor)
             continue
 
         bufnr = view._vim.call('bufnr', f'^{path}$')
@@ -231,7 +243,7 @@ def _new_directory(view: View, defx: Defx, context: Context) -> None:
 
     filename.mkdir(parents=True)
     view.redraw(True)
-    view.search_file(filename, defx._index)
+    view.search_recursive(filename, defx._index)
 
 
 @action(name='new_file')
@@ -269,7 +281,7 @@ def _new_file(view: View, defx: Defx, context: Context) -> None:
         filename.touch()
 
     view.redraw(True)
-    view.search_file(filename, defx._index)
+    view.search_recursive(filename, defx._index)
 
 
 @action(name='new_multiple_files')
@@ -312,7 +324,7 @@ def _new_multiple_files(view: View, defx: Defx, context: Context) -> None:
             filename.touch()
 
     view.redraw(True)
-    view.search_file(filename, defx._index)
+    view.search_recursive(filename, defx._index)
 
 
 @action(name='open')
@@ -326,7 +338,7 @@ def _open(view: View, defx: Defx, context: Context) -> None:
         path = target['action__path']
 
         if path.is_dir():
-            view.cd(defx, str(path), context.cursor)
+            view.cd(defx, defx._source.name, str(path), context.cursor)
             continue
 
         try:
@@ -348,7 +360,7 @@ def _open_directory(view: View, defx: Defx, context: Context) -> None:
             path = target['action__path']
 
     if path.is_dir():
-        view.cd(defx, str(path), context.cursor)
+        view.cd(defx, 'file', str(path), context.cursor)
 
 
 @action(name='paste', attr=ActionAttr.NO_TAGETS)
@@ -390,7 +402,48 @@ def _paste(view: View, defx: Defx, context: Context) -> None:
 
     view.redraw(True)
     if dest:
-        view.search_file(dest, defx._index)
+        view.search_recursive(dest, defx._index)
+
+
+@action(name='preview')
+def _preview(view: View, defx: Defx, context: Context) -> None:
+    candidate = view.get_cursor_candidate(context.cursor)
+    if not candidate or candidate['action__path'].is_dir():
+        return
+
+    filepath = str(candidate['action__path'])
+    guess_type = mimetypes.guess_type(filepath)[0]
+    if (guess_type and guess_type.startswith('image/') and
+            importlib.util.find_spec('ueberzug')):
+        # Preview image file
+        preview_image_py = Path(__file__).parent.parent.joinpath(
+            'preview_image.py')
+        if view._vim.call('has', 'nvim'):
+            jobfunc = 'jobstart'
+            jobopts = {}
+        else:
+            jobfunc = 'job_start'
+            jobopts = {'in_io': 'null', 'out_io': 'null', 'err_io': 'null'}
+        view._vim.call(jobfunc,
+                       [get_python_exe(), str(preview_image_py), filepath,
+                        view._vim.call('winwidth', 0), context.preview_width],
+                       jobopts)
+        return
+
+    has_preview = bool(view._vim.call('defx#util#_get_preview_window'))
+    if (has_preview and view._previewed_target and
+            view._previewed_target == candidate):
+        view._vim.command('pclose!')
+        return
+
+    prev_id = view._vim.call('win_getid')
+
+    view._previewed_target = candidate
+    view._vim.call('defx#util#preview_file',
+                   context._replace(targets=[])._asdict(), filepath)
+    view._vim.current.window.options['foldenable'] = False
+
+    view._vim.call('win_gotoid', prev_id)
 
 
 @action(name='remove', attr=ActionAttr.REDRAW)
@@ -418,8 +471,11 @@ def _remove(view: View, defx: Defx, context: Context) -> None:
         else:
             path.unlink()
 
+        view._vim.call('defx#util#buffer_delete',
+                       view._vim.call('bufnr', str(path)))
 
-@action(name='remove_trash')
+
+@action(name='remove_trash', attr=ActionAttr.REDRAW)
 def _remove_trash(view: View, defx: Defx, context: Context) -> None:
     """
     Delete the file or directory.
@@ -443,7 +499,9 @@ def _remove_trash(view: View, defx: Defx, context: Context) -> None:
     import send2trash
     for target in context.targets:
         send2trash.send2trash(str(target['action__path']))
-    view.redraw(True)
+
+        view._vim.call('defx#util#buffer_delete',
+                       view._vim.call('bufnr', str(target['action__path'])))
 
 
 @action(name='rename')
@@ -477,5 +535,9 @@ def _rename(view: View, defx: Defx, context: Context) -> None:
 
         old.rename(new)
 
+        # Check rename
+        view._vim.call('defx#util#buffer_rename',
+                       view._vim.call('bufnr', str(old)), str(new))
+
         view.redraw(True)
-        view.search_file(new, defx._index)
+        view.search_recursive(new, defx._index)

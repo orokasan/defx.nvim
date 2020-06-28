@@ -14,7 +14,7 @@ from defx.clipboard import Clipboard
 from defx.context import Context
 from defx.defx import Defx
 from defx.session import Session
-from defx.util import error, import_plugin, safe_call, Nvim
+from defx.util import error, import_plugin, safe_call, Nvim, Candidate
 
 
 class View(object):
@@ -36,24 +36,30 @@ class View(object):
         self._winrestcmd = ''
         self._session_version = '1.0'
         self._sessions: typing.Dict[str, Session] = {}
+        self._previewed_target: typing.Optional[Candidate] = None
 
-    def init(self, paths: typing.List[str],
-             context: typing.Dict[str, typing.Any],
-             clipboard: Clipboard
-             ) -> None:
+    def init(self, context: typing.Dict[str, typing.Any]) -> None:
         self._context = self._init_context(context)
         self._bufname = f'[defx] {self._context.buffer_name}-{self._index}'
         self._winrestcmd = self._vim.call('winrestcmd')
         self._prev_wininfo = self._get_wininfo()
         self._prev_bufnr = self._context.prev_bufnr
 
-        if not self._init_defx(paths, clipboard):
+    def init_paths(self, paths: typing.List[typing.List[str]],
+                   context: typing.Dict[str, typing.Any],
+                   clipboard: Clipboard
+                   ) -> None:
+        self.init(context)
+
+        if self._init_defx_paths(paths, clipboard):
             # Skipped initialize
-            self._winid = self._vim.call('win_getid')
-            if paths and self._vim.call('bufnr', '%') == self._bufnr:
-                self._update_defx(paths)
-            self._init_columns(self._context.columns.split(':'))
-            self.redraw(True)
+            return
+
+        self._winid = self._vim.call('win_getid')
+        if paths and self._vim.call('bufnr', '%') == self._bufnr:
+            self._update_defx_paths(paths)
+        self._init_columns(self._context.columns.split(':'))
+        self.redraw(True)
 
     def do_action(self, action_name: str,
                   action_args: typing.List[str],
@@ -193,7 +199,8 @@ class View(object):
                 return pos
         return -1
 
-    def cd(self, defx: Defx, path: str, cursor: int) -> None:
+    def cd(self, defx: Defx, source_name: str,
+           path: str, cursor: int) -> None:
         history = defx._cursor_history
 
         # Save previous cursor position
@@ -202,8 +209,14 @@ class View(object):
             history[defx._cwd] = candidate['action__path']
 
         global_histories = self._vim.vars['defx#_histories']
-        global_histories.append(defx._cwd)
+        global_histories.append([defx._source.name, defx._cwd])
         self._vim.vars['defx#_histories'] = global_histories
+
+        if source_name != defx._source.name:
+            # Replace with new defx
+            self._defxs[defx._index] = Defx(self._vim, self._context,
+                                            source_name, path, defx._index)
+            defx = self._defxs[defx._index]
 
         defx.cd(path)
         self.redraw(True)
@@ -226,6 +239,21 @@ class View(object):
 
         self._vim.call('cursor', [pos + 1, 1])
         return True
+
+    def search_recursive(self, path: Path, index: int) -> None:
+        parents: typing.List[Path] = []
+        tmppath: Path = path
+        while self.get_candidate_pos(
+                tmppath, index) < 0 and tmppath.parent != path:
+            tmppath = tmppath.parent
+            parents.append(tmppath)
+
+        for parent in reversed(parents):
+            self.open_tree(parent, index, False, 0)
+
+        self.update_candidates()
+        self.redraw()
+        self.search_file(path, index)
 
     def update_candidates(self) -> None:
         # Update opened/selected state
@@ -331,9 +359,7 @@ class View(object):
         self.update_candidates()
         self.redraw()
 
-    def _init_defx(self,
-                   paths: typing.List[str],
-                   clipboard: Clipboard) -> bool:
+    def _init_defx(self, clipboard: Clipboard) -> bool:
         if not self._switch_buffer():
             return False
 
@@ -341,12 +367,9 @@ class View(object):
         self._bufnr = self._buffer.number
         self._winid = self._vim.call('win_getid')
 
-        if not paths:
-            paths = [self._vim.call('getcwd')]
-
         self._buffer.vars['defx'] = {
             'context': self._context._asdict(),
-            'paths': paths,
+            'paths': [],
         }
 
         # Note: Have to use setlocal instead of "current.window.options"
@@ -397,23 +420,36 @@ class View(object):
         self._candidates = []
         self._clipboard = clipboard
         self._defxs = []
-        self._update_defx(paths)
 
         self._init_all_columns()
         self._init_columns(self._context.columns.split(':'))
+
+        self._vim.vars['defx#_drives'] = self._context.drives
+
+        return True
+
+    def _init_defx_paths(self,
+                         paths: typing.List[typing.List[str]],
+                         clipboard: Clipboard) -> bool:
+        if not self._init_defx(clipboard):
+            return False
+
+        if not paths:
+            paths = [['file', self._vim.call('getcwd')]]
+
+        self._buffer.vars['defx']['paths'] = paths
+        self._update_defx_paths(paths)
 
         self.redraw(True)
 
         if self._context.session_file:
             self.do_action('load_session', [],
                            self._vim.call('defx#init#_context', {}))
-            for [index, path] in enumerate(paths):
+            for [index, [source_name, path]] in enumerate(paths):
                 self._check_session(index, path)
 
         for defx in self._defxs:
             self._init_cursor(defx)
-
-        self._vim.vars['defx#_drives'] = self._context.drives
 
         return True
 
@@ -662,17 +698,20 @@ class View(object):
 
         return result
 
-    def _update_defx(self, paths: typing.List[str]) -> None:
+    def _update_defx_paths(self,
+                           paths: typing.List[typing.List[str]]) -> None:
         self._defxs = self._defxs[:len(paths)]
 
-        for [index, path] in enumerate(paths):
+        for [index, [source_name, path]] in enumerate(paths):
             if index >= len(self._defxs):
                 self._defxs.append(
-                    Defx(self._vim, self._context, path, index))
+                    Defx(self._vim, self._context, source_name, path, index))
             else:
-                self.cd(self._defxs[index], path, self._context.cursor)
+                defx = self._defxs[index]
+                self.cd(defx, defx._source.name, path, self._context.cursor)
             self._update_paths(index, path)
 
     def _check_bufnr(self, bufnr: int) -> bool:
         return (bool(self._vim.call('bufexists', bufnr)) and
-                bufnr != self._vim.call('bufnr', '%'))
+                bufnr != self._vim.call('bufnr', '%') and
+                self._vim.call('getbufvar', bufnr, '&filetype') != 'defx')
