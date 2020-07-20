@@ -333,7 +333,7 @@ function! s:strwidthpart_reverse(str, width) abort
 endfunction
 
 function! defx#util#buffer_rename(bufnr, new_filename) abort
-  if a:bufnr < 0
+  if a:bufnr < 0 || !bufloaded(a:bufnr)
     return
   endif
 
@@ -385,11 +385,11 @@ endfunction
 function! defx#util#preview_file(context, filename) abort
   let preview_width = str2nr(a:context.preview_width)
   let preview_height = str2nr(a:context.preview_height)
+  let pos = win_screenpos(win_getid())
+  let win_width = winwidth(0)
+  let win_height = winheight(0)
 
   if a:context.vertical_preview
-    let pos = win_screenpos(win_getid())
-    let win_width = winwidth(0)
-
     call defx#util#execute_path(
           \ 'silent rightbelow vertical pedit!', a:filename)
     wincmd P
@@ -418,14 +418,34 @@ function! defx#util#preview_file(context, filename) abort
       execute 'vert resize ' . preview_width
     endif
   else
-    let previewheight_save = &previewheight
-    try
-      let &previewheight = preview_height
-      call defx#util#execute_path('silent aboveleft pedit!', a:filename)
-    finally
-      let &previewheight = previewheight_save
-    endtry
+    call defx#util#execute_path('silent aboveleft pedit!', a:filename)
 
     wincmd P
+
+    if a:context.floating_preview && exists('*nvim_win_set_config')
+      let win_row = pos[0] - 1
+      let win_col = pos[1] + 1
+      if win_row <= preview_height
+        let win_row += win_height + 1
+        let anchor = 'NW'
+      else
+        let anchor = 'SW'
+      endif
+
+      call nvim_win_set_config(0, {
+            \ 'relative': 'editor',
+            \ 'anchor': anchor,
+            \ 'row': win_row,
+            \ 'col': win_col,
+            \ 'width': preview_width,
+            \ 'height': preview_height,
+            \ })
+    else
+      execute 'resize ' . preview_height
+    endif
+  endif
+
+  if exists('#User#defx-preview')
+    doautocmd User defx-preview
   endif
 endfunction
