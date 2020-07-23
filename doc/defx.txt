@@ -346,8 +346,10 @@ paste							*defx-action-paste*
 preview							*defx-action-preview*
 		Preview the file.  Close the preview window if it is already
 		exists.
-		Note: ueberzug module is needed to preview image files.
+		Note: "ueberzug" and "bash" commands are needed to preview
+		image files.
 		https://pypi.org/project/ueberzug/
+		Note: The image preview is for X11 only.
 
 print 						*defx-action-print*
 		Print the filename.
@@ -452,6 +454,11 @@ OPTIONS							*defx-options*
 		Specify defx buffer name.
 		Default: "default"
 
+							*defx-option-close*
+-close
+		Close defx buffer window.
+		Default: false
+
 							*defx-option-columns*
 -columns={columns1:columns2,...}
 		Specify defx columns.
@@ -463,6 +470,12 @@ OPTIONS							*defx-options*
 		|defx-option-split| is set.
 		You can use "topleft" or "botright".
 		Default: ""
+
+						*defx-option-focus*
+-focus
+		Focus on the defx buffer after opening a defx buffer.
+
+		Default: true
 
 					*defx-option-floating-preview*
 -floating-preview
@@ -839,6 +852,12 @@ Q: I want to open file by double click.
 
 A: >
 	nnoremap <silent><buffer><expr> <2-LeftMouse> defx#do_action('open')
+
+
+Q: I want to separate defx state by tabs.
+
+A: >
+	Defx -buffer-name=`'defx' . tabpagenr()`
 
 ==============================================================================
 COMPATIBILITY						*defx-compatibility*

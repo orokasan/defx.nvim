@@ -34,9 +34,11 @@ class View(object):
         self._prev_syntaxes: typing.List[str] = []
         self._prev_highlight_commands: typing.List[str] = []
         self._winrestcmd = ''
+        self._has_preview_window = False
         self._session_version = '1.0'
         self._sessions: typing.Dict[str, Session] = {}
         self._previewed_target: typing.Optional[Candidate] = None
+        self._previewed_job: typing.Optional[int] = None
 
     def init(self, context: typing.Dict[str, typing.Any]) -> None:
         self._context = self._init_context(context)
@@ -44,6 +46,9 @@ class View(object):
         self._winrestcmd = self._vim.call('winrestcmd')
         self._prev_wininfo = self._get_wininfo()
         self._prev_bufnr = self._context.prev_bufnr
+        self._has_preview_window = len(
+            [x for x in range(1, self._vim.call('winnr', '$'))
+             if self._vim.call('getwinvar', x, '&previewwindow')]) > 0
 
     def init_paths(self, paths: typing.List[typing.List[str]],
                    context: typing.Dict[str, typing.Any],
@@ -51,7 +56,7 @@ class View(object):
                    ) -> None:
         self.init(context)
 
-        if self._init_defx_paths(paths, clipboard):
+        if not self._init_defx_paths(paths, clipboard):
             # Skipped initialize
             return
 
@@ -100,6 +105,15 @@ class View(object):
         self._vim.call('defx#util#print_message', expr)
 
     def quit(self) -> None:
+        # Close preview window
+        if not self._has_preview_window:
+            self._vim.command('pclose!')
+        # Clear previewed buffers
+        for bufnr in self._vim.vars['defx#_previewed_buffers'].keys():
+            if not self._vim.call('win_findbuf', bufnr):
+                self._vim.command('silent bdelete ' + str(bufnr))
+        self._vim.vars['defx#_previewed_buffers'] = {}
+
         winnr = self._vim.call('bufwinnr', self._bufnr)
         if winnr < 0:
             return
@@ -243,8 +257,8 @@ class View(object):
     def search_recursive(self, path: Path, index: int) -> None:
         parents: typing.List[Path] = []
         tmppath: Path = path
-        while self.get_candidate_pos(
-                tmppath, index) < 0 and tmppath.parent != path:
+        while (self.get_candidate_pos(tmppath, index) < 0 and
+               tmppath.parent != path and tmppath.parent != tmppath):
             tmppath = tmppath.parent
             parents.append(tmppath)
 
@@ -337,7 +351,9 @@ class View(object):
 
         return Context(**context)
 
-    def _resize_window(self) -> None:
+    def _init_window(self) -> None:
+        self._winid = self._vim.call('win_getid')
+
         window_options = self._vim.current.window.options
         if (self._context.split == 'vertical'
                 and self._context.winwidth > 0):
@@ -365,7 +381,6 @@ class View(object):
 
         self._buffer = self._vim.current.buffer
         self._bufnr = self._buffer.number
-        self._winid = self._vim.call('win_getid')
 
         self._buffer.vars['defx'] = {
             'context': self._context._asdict(),
@@ -390,7 +405,7 @@ class View(object):
         if self._context.split == 'floating':
             self._vim.command('setlocal nocursorline')
 
-        self._resize_window()
+        self._init_window()
 
         buffer_options = self._buffer.options
         if not self._context.listed:
@@ -431,10 +446,18 @@ class View(object):
     def _init_defx_paths(self,
                          paths: typing.List[typing.List[str]],
                          clipboard: Clipboard) -> bool:
-        if not self._init_defx(clipboard):
+
+        initialized = self._init_defx(clipboard)
+
+        # Window check
+        if self._vim.call('win_getid') != self._winid:
+            # Not defx window
             return False
 
         if not paths:
+            if not initialized:
+                # Don't initialize path
+                return False
             paths = [['file', self._vim.call('getcwd')]]
 
         self._buffer.vars['defx']['paths'] = paths
@@ -457,13 +480,18 @@ class View(object):
         if self._context.split == 'tab':
             self._vim.command('tabnew')
 
+        if self._context.close:
+            self.quit()
+            return False
+
         winnr = self._vim.call('bufwinnr', self._bufnr)
         if winnr > 0:
             self._vim.command(f'{winnr}wincmd w')
             if self._context.toggle:
                 self.quit()
             else:
-                self._resize_window()
+                self._winid = self._vim.call('win_getid')
+                self._init_window()
             return False
 
         if (self._vim.current.buffer.options['modified'] and
@@ -498,7 +526,7 @@ class View(object):
                 )
             )
             if self._context.resume:
-                self._resize_window()
+                self._init_window()
                 return False
         elif self._vim.call('exists', 'bufadd'):
             bufnr = self._vim.call('bufadd', self._bufname)

@@ -16,6 +16,7 @@ function! defx#init#_initialize() abort
   augroup END
 
   let g:defx#_histories = []
+  let g:defx#_previewed_buffers = {}
 endfunction
 function! defx#init#_channel() abort
   if !has('python3')
@@ -95,9 +96,11 @@ function! defx#init#_user_options() abort
         \ 'auto_cd': v:false,
         \ 'auto_recursive_level': 0,
         \ 'buffer_name': 'default',
+        \ 'close': v:false,
         \ 'columns': 'mark:indent:icon:filename:type',
         \ 'direction': '',
         \ 'floating_preview': v:false,
+        \ 'focus': v:true,
         \ 'ignored_files': '.*',
         \ 'listed': v:false,
         \ 'new': v:false,

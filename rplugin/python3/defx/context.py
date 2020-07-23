@@ -12,10 +12,12 @@ class Context(typing.NamedTuple):
     auto_cd: bool = False
     auto_recursive_level: int = 0
     buffer_name: str = 'default'
+    close: bool = False
     columns: str = ''
     cursor: int = 0
     direction: str = ''
     drives: typing.List[str] = []
+    focus: bool = False
     floating_preview: bool = False
     ignored_files: str = ''
     listed: bool = False
