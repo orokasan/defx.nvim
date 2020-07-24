@@ -63,7 +63,7 @@ class Column(Base):
                      len_bytes(candidate['word']) - root_len),
                 ]
             else:
-                highlights = [('PreProc', self.start,
+                highlights = [('directory', self.start,
                                len_bytes(candidate['word']))]
 
         text += candidate['word']
