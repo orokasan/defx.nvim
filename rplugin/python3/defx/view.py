@@ -591,6 +591,7 @@ class View(object):
         start = 1
         for [index, column] in enumerate(self._columns):
             column.syntax_name = f'Defx_{column.name}_{index}'
+            column.highlight_name = f'Defx_{column.name}'
 
             if within_variable and not column.is_stop_variable:
                 within_variable_columns.append(column)
@@ -637,15 +638,17 @@ class View(object):
 
         self._prev_syntaxes = []
         for column in self._columns:
-            if column.has_get_with_highlights and self._ns > 0:
-                # Use get_with_highlights() instead
-                continue
-
+            with_highlights = column.has_get_with_highlights and self._ns > 0
             source_highlights = column.highlight_commands()
+            if with_highlights:
+                # Use source highlights only
+                source_highlights = [x for x in source_highlights
+                                     if x.startswith('highlight ')]
             if not source_highlights:
                 continue
 
-            if (not column.is_within_variable and
+            if (not with_highlights and
+                    not column.is_within_variable and
                     column.start > 0 and column.end > 0):
                 commands.append(
                     'syntax region ' + column.syntax_name +
@@ -656,14 +659,19 @@ class View(object):
             commands += source_highlights
             self._prev_syntaxes += column.syntaxes()
 
-        syntax_list = commands + [self._vim.call('execute', 'syntax list')]
+        syntax_list = commands + [
+            self._vim.call('execute', 'syntax list'),
+            self._vim.call('execute', 'highlight'),
+        ]
         if syntax_list == self._prev_highlight_commands:
             # Skip highlights
             return
 
         self._execute_commands(commands)
         self._prev_highlight_commands = commands + [
-            self._vim.call('execute', 'syntax list')]
+            self._vim.call('execute', 'syntax list'),
+            self._vim.call('execute', 'highlight'),
+        ]
 
     def _execute_commands(self, commands: typing.List[str]) -> None:
         # Note: If commands are too huge, vim.command() will fail.

@@ -56,7 +56,8 @@ class Column(Base):
                 if not candidate['action__path'].match(glob):
                     continue
                 return (str(t['icon']), [
-                    (t['highlight'], self.start, len_bytes(t['icon']))
+                    (f"{self.highlight_name}_{t['name']}",
+                     self.start, len_bytes(t['icon']))
                 ])
 
         return (' ' * self._length, [])
@@ -77,5 +78,5 @@ class Column(Base):
                     self.syntax_name, t['name'], re.escape(t['icon'])))
             commands.append(
                 'highlight default link {}_{} {}'.format(
-                    self.syntax_name, t['name'], t['highlight']))
+                    self.highlight_name, t['name'], t['highlight']))
         return commands
